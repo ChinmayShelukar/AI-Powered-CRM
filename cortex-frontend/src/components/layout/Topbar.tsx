@@ -30,6 +30,7 @@ const ROUTE_LABELS: Record<string, string> = {
   "/activities": "Activities",
   "/ai":         "AI Assistant",
   "/audit":      "Audit Log",
+  "/profile":    "Profile",
 };
 
 interface TopbarProps {
@@ -95,9 +96,9 @@ export function Topbar({ onMenuClick }: TopbarProps) {
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>
+            <DropdownMenuItem onClick={() => navigate("/profile")}>
               <UserIcon className="mr-2 h-4 w-4" />
-              Profile (soon)
+              Profile
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleSignOut} className="text-destructive focus:text-destructive">

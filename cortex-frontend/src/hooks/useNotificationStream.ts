@@ -93,7 +93,14 @@ export function useNotificationStream(): void {
       // every transient blip; bell badge will simply pause until reconnect.
     };
 
+    // Close before the browser suspends the in-flight request on reload/close,
+    // which otherwise logs net::ERR_NETWORK_IO_SUSPENDED. Client-side nav uses
+    // the unmount cleanup below instead.
+    const closeOnHide = () => es.close();
+    window.addEventListener("pagehide", closeOnHide);
+
     return () => {
+      window.removeEventListener("pagehide", closeOnHide);
       EVENT_TYPES.forEach((type, i) => {
         es.removeEventListener(type, handlers[i] as EventListener);
       });

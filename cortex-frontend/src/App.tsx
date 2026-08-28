@@ -9,6 +9,7 @@ import Deals from "@/pages/Deals";
 import Activities from "@/pages/Activities";
 import AiChat from "@/pages/AiChat";
 import AuditLog from "@/pages/AuditLog";
+import Profile from "@/pages/Profile";
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/activities" element={<Activities />} />
           <Route path="/audit" element={<AuditLog />} />
           <Route path="/ai" element={<AiChat />} />
+          <Route path="/profile" element={<Profile />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
