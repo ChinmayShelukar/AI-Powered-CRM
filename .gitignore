@@ -1,0 +1,58 @@
+# ----- Local AI dev context (not for GitHub) -----
+CLAUDE_CONTEXT.md
+CLAUDE.md
+.claude/
+
+# ----- Secrets / local config -----
+.env
+.env.*
+!.env.example
+*-local.yml
+*-local.yaml
+*.local
+
+# ----- Build artifacts -----
+target/
+dist/
+dist-ssr/
+*.class
+*.jar
+*.war
+
+# ----- Dependencies -----
+node_modules/
+
+# ----- Logs -----
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ----- OS -----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- IDE -----
+.idea/
+.vscode/
+.cursor/
+*.suo
+*.sln
+*.sw?
+*.iml
+*.iws
+*.ipr
+.settings/
+.classpath
+.project
+.factorypath
+.springBeans
+.sts4-cache
+
+# ----- Deployment (local drafts, not for repo) -----
+render.yaml
+railway.json
+docker-compose.prod.yml
+Dockerfile.prod

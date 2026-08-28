@@ -1,0 +1,60 @@
+name: Synthetic Monitoring
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # every 5 minutes
+  workflow_dispatch:
+
+concurrency:
+  group: synthetic
+  cancel-in-progress: false # never cancel a running probe
+
+jobs:
+  probes:
+    name: Synthetic Probes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm install -g pnpm
+      - name: Install Playwright
+        working-directory: synthetic
+        run: |
+          pnpm init -y || true
+          pnpm add -D @playwright/test
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Run synthetic probes
+        working-directory: synthetic
+        env:
+          SYNTHETIC_BASE_URL: ${{ vars.PRODUCTION_URL }}
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
+          SYNTHETIC_EMAIL: ${{ secrets.SYNTHETIC_EMAIL }}
+          SYNTHETIC_PASSWORD: ${{ secrets.SYNTHETIC_PASSWORD }}
+        run: pnpm exec playwright test --config=playwright.config.ts
+
+      - name: Upload probe results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthetic-results-${{ github.run_number }}
+          path: |
+            synthetic/synthetic-results.json
+            synthetic/test-results/
+          retention-days: 7
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_MONITORING_WEBHOOK }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK" ]; then
+            curl -s -X POST "$SLACK_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"text\": \"🚨 *[SYNTHETIC] CortexCRM probe FAILED*\n• Run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|#${{ github.run_number }}>\n• Time: $(date -u)\n• Runbook: https://github.com/${{ github.repository }}/blob/main/docs/runbooks/login-probe.md\"
+              }"
+          fi

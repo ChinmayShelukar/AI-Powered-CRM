@@ -1,0 +1,216 @@
+name: Nightly Full Suite
+
+on:
+  schedule:
+    - cron: "17 2 * * *" # 2:17 AM daily (off-peak, off :00/:30)
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  # ── Full E2E (all browsers) ────────────────────────────────────────────────
+  e2e-full:
+    name: Full E2E — ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cortexcrm
+          POSTGRES_USER: cortex
+          POSTGRES_PASSWORD: cortex
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm install -g pnpm
+      - working-directory: cortex-frontend
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        working-directory: cortex-frontend
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Start backend
+        working-directory: cortex-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cortexcrm
+          SPRING_DATASOURCE_USERNAME: cortex
+          SPRING_DATASOURCE_PASSWORD: cortex
+          JWT_SECRET: ci-test-secret-32-chars-minimum!!
+        run: |
+          mvn -B -q spring-boot:run &
+          for i in {1..30}; do
+            curl -sf http://localhost:8080/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d '{"email":"x","password":"x"}' && break || sleep 3
+          done
+      - name: Run full E2E suite
+        working-directory: cortex-frontend
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8080
+        run: |
+          pnpm dev &
+          sleep 5
+          pnpm exec playwright test --project=${{ matrix.browser }} --grep-invert "@flaky|@visual"
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-results-${{ matrix.browser }}
+          path: cortex-frontend/test-results/
+          retention-days: 30
+
+  # ── Smoke tests (run after full E2E) ──────────────────────────────────────
+  smoke:
+    name: Smoke — @smoke tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [e2e-full]
+    if: ${{ !cancelled() }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cortexcrm
+          POSTGRES_USER: cortex
+          POSTGRES_PASSWORD: cortex
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm install -g pnpm
+      - working-directory: cortex-frontend
+        run: pnpm install --frozen-lockfile
+      - working-directory: cortex-frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Start backend
+        working-directory: cortex-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cortexcrm
+          SPRING_DATASOURCE_USERNAME: cortex
+          SPRING_DATASOURCE_PASSWORD: cortex
+          JWT_SECRET: ci-test-secret-32-chars-minimum!!
+        run: |
+          mvn -B -q spring-boot:run &
+          for i in {1..30}; do
+            curl -sf http://localhost:8080/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d '{"email":"x","password":"x"}' && break || sleep 3
+          done
+      - name: Run smoke suite
+        working-directory: cortex-frontend
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8080
+        run: |
+          pnpm dev &
+          sleep 5
+          pnpm exec playwright test --grep @smoke
+
+  # ── Load test ─────────────────────────────────────────────────────────────
+  load-test:
+    name: Load Test (baseline)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cortexcrm
+          POSTGRES_USER: cortex
+          POSTGRES_PASSWORD: cortex
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v6
+      - uses: grafana/setup-k6-action@v1
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Start backend
+        working-directory: cortex-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cortexcrm
+          SPRING_DATASOURCE_USERNAME: cortex
+          SPRING_DATASOURCE_PASSWORD: cortex
+          JWT_SECRET: ci-test-secret-32-chars-minimum!!
+        run: |
+          mvn -B -q spring-boot:run &
+          for i in {1..30}; do
+            curl -sf http://localhost:8080/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d '{"email":"x","password":"x"}' && break || sleep 3
+          done
+      - name: Run baseline load test
+        run: k6 run --env BASE_URL=http://localhost:8080 --env PROFILE=baseline load-tests/api-load.js
+      - name: Upload k6 results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-results
+          path: "*.json"
+          retention-days: 30
+
+  # ── Flaky test quarantine ─────────────────────────────────────────────────
+  flaky-quarantine:
+    name: Quarantined Tests (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm install -g pnpm
+      - working-directory: cortex-frontend
+        run: pnpm install --frozen-lockfile
+      - working-directory: cortex-frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run quarantined tests
+        working-directory: cortex-frontend
+        run: pnpm exec playwright test --grep @flaky || true
+      - name: Warn if quarantined tests failed
+        if: failure()
+        run: echo "::warning::Quarantined tests failed. Review and fix or remove @flaky tag."

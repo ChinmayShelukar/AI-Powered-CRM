@@ -1,0 +1,22 @@
+# Copy this file to application-local.yml (gitignored) and fill in your values.
+# Loaded automatically when SPRING_PROFILES_ACTIVE=local.
+
+app:
+  jwt:
+    secret: "replace-with-a-random-64-char-hex-string"   # Required — generate with: openssl rand -hex 32
+
+# CLAUDE_API_KEY must NOT be stored here — pass it as a terminal env var only:
+#   $env:CLAUDE_API_KEY="sk-ant-api03-..."   # PowerShell
+#   export CLAUDE_API_KEY="sk-ant-api03-..."  # bash/zsh
+# AI endpoints return 503 when the key is absent; the rest of the app works fine.
+
+# DB and Redis defaults match docker-compose.yml — only override if you changed them there.
+# spring:
+#   datasource:
+#     url: jdbc:postgresql://localhost:5432/cortexcrm
+#     username: cortex
+#     password: cortex
+#   data:
+#     redis:
+#       host: localhost
+#       port: 6379

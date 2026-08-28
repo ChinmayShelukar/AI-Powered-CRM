@@ -1,0 +1,111 @@
+name: Bug Report
+description: Report a bug in CortexCRM
+title: "[Bug]: "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in as much as you can. The more detail, the faster we fix it.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - critical (system unusable, data loss, auth bypass)
+        - major (core feature broken, workaround exists)
+        - minor (non-core feature degraded)
+        - trivial (cosmetic only)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - auth
+        - contacts
+        - deals
+        - activities
+        - analytics
+        - dashboard-ui
+        - contacts-ui
+        - team-insights
+        - briefing-agent
+        - ai-safety
+        - other
+    validations:
+      required: true
+
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Fingerprint (CI only)
+      description: 16-char hash from triage-bug.js — leave blank for manual reports
+      placeholder: a3f8b2c1e9d04567
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Plain language. No raw CI logs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Log in as admin@cortex.com
+        2. Navigate to /contacts
+        3. Click Add Contact
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Relevant log lines (5-10 max), screenshots, or test output
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does this happen?
+      options:
+        - Always (100%)
+        - Frequently (>50%)
+        - Sometimes (10-50%)
+        - Rarely (<10%)
+        - Once
+
+  - type: textarea
+    id: root_cause
+    attributes:
+      label: Suspected root cause (optional)
+      description: Stack frame, service, or hypothesis
+
+  - type: textarea
+    id: related
+    attributes:
+      label: Related issues
+      description: Fingerprint labels or issue numbers of related bugs

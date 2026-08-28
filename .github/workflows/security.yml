@@ -1,0 +1,187 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "43 3 * * 1" # weekly Monday 3:43 AM
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Layer 1: Secret scanning ──────────────────────────────────────────────
+  secret-scan:
+    name: Secret Scanning (TruffleHog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: TruffleHog — verified secrets only
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          extra_args: --only-verified
+
+  # ── Layer 2: Dependency / supply-chain ────────────────────────────────────
+  dependency-scan:
+    name: Dependency Scan (OSV-Scanner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: OSV-Scanner — exits non-zero on any vuln
+        uses: google/osv-scanner-action@v2
+        with:
+          scan-args: |-
+            --recursive
+            --skip-git
+            ./
+      - name: npm audit — frontend high/critical
+        working-directory: cortex-frontend
+        run: |
+          npm install -g pnpm && pnpm install --frozen-lockfile
+          pnpm audit --audit-level=high || true  # advisory only; OSV-Scanner is the gate
+
+  # ── Layer 3: SAST (Semgrep) ───────────────────────────────────────────────
+  sast:
+    name: SAST (Semgrep OWASP Top 10)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Semgrep scan — OWASP Top 10
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/owasp-top-ten
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+  # ── Layer 4: DAST (OWASP ZAP) ────────────────────────────────────────────
+  zap-baseline:
+    name: DAST — OWASP ZAP Baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cortexcrm
+          POSTGRES_USER: cortex
+          POSTGRES_PASSWORD: cortex
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Start backend
+        working-directory: cortex-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cortexcrm
+          SPRING_DATASOURCE_USERNAME: cortex
+          SPRING_DATASOURCE_PASSWORD: cortex
+          JWT_SECRET: ci-test-secret-32-chars-minimum!!
+        run: |
+          mvn -B -q spring-boot:run &
+          for i in {1..30}; do
+            curl -sf http://localhost:8080/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d '{"email":"x","password":"x"}' && break || sleep 3
+          done
+
+      - name: ZAP API baseline scan
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: "http://localhost:8080"
+          cmd_options: "-a"
+          fail_action: false  # advisory; don't gate on ZAP alone
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zap-report
+          path: report_html.html
+          retention-days: 30
+
+  # ── Layer 5: Custom auth security tests ───────────────────────────────────
+  security-playwright:
+    name: Security E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cortexcrm
+          POSTGRES_USER: cortex
+          POSTGRES_PASSWORD: cortex
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: npm install -g pnpm
+      - working-directory: cortex-frontend
+        run: pnpm install --frozen-lockfile
+      - working-directory: cortex-frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: temurin
+          cache: maven
+      - name: Start backend
+        working-directory: cortex-backend
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/cortexcrm
+          SPRING_DATASOURCE_USERNAME: cortex
+          SPRING_DATASOURCE_PASSWORD: cortex
+          JWT_SECRET: ci-test-secret-32-chars-minimum!!
+        run: |
+          mvn -B -q spring-boot:run &
+          for i in {1..30}; do
+            curl -sf http://localhost:8080/api/auth/login \
+              -H "Content-Type: application/json" \
+              -d '{"email":"x","password":"x"}' && break || sleep 3
+          done
+      - name: Run security test suite
+        working-directory: cortex-frontend
+        env:
+          BASE_URL: http://localhost:5173
+          API_URL: http://localhost:8080
+        run: |
+          pnpm dev &
+          sleep 5
+          pnpm exec playwright test --project=security
+      - name: Upload security test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: security-test-results
+          path: cortex-frontend/test-results/
+          retention-days: 30
